@@ -1,0 +1,140 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: blog-gateway-service
+  namespace: blog
+  labels:
+    app: blog-gateway
+spec:
+  selector:
+    app: blog-gateway
+  ports:
+  - protocol: TCP
+    port: 8080
+    nodePort: 30089
+  type: NodePort
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blog-gateway-config
+  namespace: blog
+  labels:
+    app: blog-gateway
+data:
+  application.yml: |-
+    spring:
+      cloud:
+        gateway:
+          routes:
+          - id: blog-api
+            uri: http://blog-api-service:8080
+            predicates:
+            - Path=/api/**
+          - id: blog-ui
+            uri: http://blog-ui-service:8080
+            predicates:
+            - Method=GET
+          default-filters:
+          - KafkaProducer=
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: blog-gateway
+  namespace: blog
+  labels:
+    app: blog-gateway
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: blog-gateway
+      annotations:
+        kubernetes.io/change-cause: "FIXME"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /actuator/prometheus
+    spec:
+      imagePullSecrets:
+      - name: harbor-secret
+      containers:
+      - name: blog-gateway
+        image: harbor-13-78-118-111.sslip.io/categolj/blog-gateway@sha256:0d79c37f2372f587060b9a8217628a71e02e1bdeec2fa7f178abbd3fe61196aa
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: application-yml
+          mountPath: /config
+          readOnly: true
+        env:
+        - name: SERVER_PORT
+          value: "8080"
+        - name: SPRING_PROFILES_ACTIVE
+          value: kubernetes
+        - name: _JAVA_OPTIONS
+          value: "-Xmx285M -Xss1M -XX:MaxMetaspaceSize=113M -XX:ReservedCodeCacheSize=32M -XX:CompressedClassSpaceSize=20M -XX:MaxDirectMemorySize=32M -XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap -XX:MaxRAMFraction=1 -Duser.timezone=Asia/Tokyo -Duser.language=en -Dinfo.docker.digest=INFO_DOCKER_DIGEST"
+        - name: SPRING_SECURITY_USER_NAME
+          valueFrom:
+            secretKeyRef:
+              name: blog-config-secret
+              key: ops-username
+        - name: SPRING_SECURITY_USER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: blog-config-secret
+              key: ops-password
+        - name: SPRING_SLEUTH_WEB_ADDITIONAL_SKIP_PATTERN
+          value: /actuator.*
+        - name: SPRING_SLEUTH_SAMPLER_PROBABILITY
+          value: "1.0"
+        - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            secretKeyRef:
+              name: blog-kafka-secret
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: SPRING_KAFKA_JAAS_OPTIONS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: blog-kafka-secret
+              key: KAFKA_JAAS_USERNAME
+        - name: SPRING_KAFKA_JAAS_OPTIONS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: blog-kafka-secret
+              key: KAFKA_JAAS_PASSWORD
+        resources:
+          limits:
+            memory: "512Mi"
+          requests:
+            memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 15
+          timeoutSeconds: 3
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 180
+          timeoutSeconds: 3
+          periodSeconds: 10
+          failureThreshold: 3
+      volumes:
+      - name: application-yml
+        configMap:
+          name: blog-gateway-config
+          items:
+          - key: application.yml
+            path: application.yml

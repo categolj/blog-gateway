@@ -1,0 +1,49 @@
+server:
+  port: 8800
+spring:
+  application:
+    name: blog-gateway
+  security:
+    user:
+      name: test
+      password: pass
+      roles: ACTUATOR
+  cloud:
+    gateway:
+      routes:
+      - id: http-bin
+        uri: https://httpbin.org
+        predicates:
+        - Host=httpbin.org
+      - id: blog-api
+        uri: http://localhost:8080
+        predicates:
+        - Path=/api/**
+      - id: blog-ui
+        uri: http://localhost:8082
+        predicates:
+        - Method=GET
+      default-filters:
+      - KafkaProducer=
+  kafka:
+    template:
+      default-topic: accesslog
+management:
+  metrics:
+    distribution:
+      sla:
+        http.server.requests: 100ms, 400ms, 500ms, 2000ms
+      percentiles:
+        http.server.requests: 0.5, 0.9, 0.95, 0.99, 0.999
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when_authorized
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+    jmx:
+      exposure:
+        exclude: "*"
